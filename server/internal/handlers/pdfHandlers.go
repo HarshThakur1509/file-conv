@@ -3,13 +3,13 @@ package handlers
 import (
 	"archive/zip"
 	"bytes"
+	"file-conv/internal/utils"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -36,7 +36,7 @@ func MergePDFs(w http.ResponseWriter, r *http.Request) {
 	defer os.RemoveAll(tempDir)
 
 	// Process uploaded files
-	files, err := processUploadedFiles(r, tempDir)
+	files, err := utils.ProcessUploadedFiles(r, tempDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -62,39 +62,6 @@ func MergePDFs(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, bytes.NewReader(mergedBytes)); err != nil {
 		http.Error(w, "Error sending response", http.StatusInternalServerError)
 	}
-}
-
-func processUploadedFiles(r *http.Request, tempDir string) ([]string, error) {
-	var files []string
-
-	// Get all files from the "pdfs" form field
-	pdfFiles := r.MultipartForm.File["pdfs"]
-	if len(pdfFiles) < 2 {
-		return nil, fmt.Errorf("at least two PDF files are required")
-	}
-
-	for _, fileHeader := range pdfFiles {
-		file, err := fileHeader.Open()
-		if err != nil {
-			return nil, fmt.Errorf("error opening uploaded file: %v", err)
-		}
-		defer file.Close()
-
-		tempPath := filepath.Join(tempDir, filepath.Base(fileHeader.Filename))
-		outFile, err := os.Create(tempPath)
-		if err != nil {
-			return nil, fmt.Errorf("error creating temporary file: %v", err)
-		}
-		defer outFile.Close()
-
-		if _, err := io.Copy(outFile, file); err != nil {
-			return nil, fmt.Errorf("error saving uploaded file: %v", err)
-		}
-
-		files = append(files, tempPath)
-	}
-
-	return files, nil
 }
 
 func SplitPDF(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +123,7 @@ func SplitPDF(w http.ResponseWriter, r *http.Request) {
 		// Split by specific page numbers
 		pageRanges := r.FormValue("pages")
 		// Convert pageRanges to a slice of integers
-		pages, err := parsePageRanges(pageRanges)
+		pages, err := utils.ParsePageRanges(pageRanges)
 		if err != nil {
 			http.Error(w, "Invalid page ranges", http.StatusBadRequest)
 			return
@@ -236,16 +203,77 @@ func SplitPDF(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parsePageRanges converts a comma-separated string of page numbers into a slice of integers
-func parsePageRanges(pageRanges string) ([]int, error) {
-	var pages []int
-	ranges := strings.Split(pageRanges, ",")
-	for _, r := range ranges {
-		page, err := strconv.Atoi(strings.TrimSpace(r))
-		if err != nil {
-			return nil, err
-		}
-		pages = append(pages, page)
+func CompressPDFHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	return pages, nil
+
+	// Parse the multipart form with a 50MB limit
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		http.Error(w, "Error parsing form data", http.StatusBadRequest)
+		return
+	}
+
+	// Retrieve the uploaded PDF file
+	file, header, err := r.FormFile("pdf")
+	if err != nil {
+		http.Error(w, "Failed to get uploaded file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "pdfcompress-")
+	if err != nil {
+		http.Error(w, "Error creating temporary directory", http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Save the uploaded file to the temporary directory
+	inputPath := filepath.Join(tempDir, header.Filename)
+	outFile, err := os.Create(inputPath)
+	if err != nil {
+		http.Error(w, "Error saving uploaded file", http.StatusInternalServerError)
+		return
+	}
+	defer outFile.Close()
+
+	if _, err := io.Copy(outFile, file); err != nil {
+		http.Error(w, "Error copying file content", http.StatusInternalServerError)
+		return
+	}
+
+	// Define the output path for the compressed PDF
+	outputPath := filepath.Join(tempDir, "compressed_"+header.Filename)
+
+	// Compress the PDF using pdfcpu
+	config := model.NewDefaultConfiguration()
+	if err := api.OptimizeFile(inputPath, outputPath, config); err != nil {
+		http.Error(w, "Error compressing PDF: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Read the compressed PDF
+	compressedFile, err := os.Open(outputPath)
+	if err != nil {
+		http.Error(w, "Error opening compressed PDF", http.StatusInternalServerError)
+		return
+	}
+	defer compressedFile.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, compressedFile); err != nil {
+		http.Error(w, "Error reading compressed PDF", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the compressed PDF as the response
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", "compressed_"+header.Filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		http.Error(w, "Error sending compressed PDF", http.StatusInternalServerError)
+	}
 }

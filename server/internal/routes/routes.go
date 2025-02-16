@@ -23,12 +23,14 @@ func (s *ApiServer) Run() error {
 	router.HandleFunc("POST /convert/jpg-to-png", handlers.ConvertJPGToPNG)
 	router.HandleFunc("POST /convert/png-to-jpg", handlers.ConvertPNGToJPG)
 	router.HandleFunc("POST /convert/to-pdf", handlers.ConvertToPDF)
+
 	router.HandleFunc("POST /compress", handlers.CompressImage)
 	router.HandleFunc("POST /resize", handlers.ResizeImage)
 	router.HandleFunc("POST /transparent", handlers.BackgroundTransparent)
 
 	router.HandleFunc("POST /merge-pdfs", handlers.MergePDFs)
 	router.HandleFunc("POST /split-pdf", handlers.SplitPDF)
+	router.HandleFunc("POST /compress-pdf", handlers.CompressPDFHandler)
 	// Add code here
 
 	stack := middleware.MiddlewareChain(middleware.Logger, middleware.RecoveryMiddleware)

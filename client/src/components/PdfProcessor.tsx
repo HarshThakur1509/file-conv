@@ -19,12 +19,13 @@ import {
 import { CloudUpload, PictureAsPdf, Delete } from '@mui/icons-material';
 import axios from 'axios';
 
-type PdfOperation = 'merge' | 'split';
+type PdfOperation = 'merge' | 'split' | 'compress';
 
 const PdfProcessor: React.FC = () => {
   const [operation, setOperation] = useState<PdfOperation>('merge');
   const [mergeFiles, setMergeFiles] = useState<File[]>([]);
   const [splitFile, setSplitFile] = useState<File | null>(null);
+  const [compressFile, setCompressFile] = useState<File | null>(null);
   const [splitMode, setSplitMode] = useState<'pages' | 'count'>('pages');
   const [pages, setPages] = useState('');
   const [count, setCount] = useState('');
@@ -38,8 +39,10 @@ const PdfProcessor: React.FC = () => {
     if (operation === 'merge') {
       const newFiles = Array.from(files);
       setMergeFiles(prev => [...prev, ...newFiles]);
-    } else {
+    } else if (operation === 'split') {
       setSplitFile(files[0]);
+    } else if (operation === 'compress') {
+      setCompressFile(files[0]);
     }
     setError('');
   };
@@ -66,8 +69,7 @@ const PdfProcessor: React.FC = () => {
 
       downloadFile(response.data, 'merged.pdf');
     } catch (err) {
-        console.log(err);
-        
+      console.log(err);
       setError('Error merging PDFs. Please try again.');
     } finally {
       setLoading(false);
@@ -107,9 +109,33 @@ const PdfProcessor: React.FC = () => {
 
       downloadFile(response.data, 'split_pdfs.zip');
     } catch (err) {
-        console.log(err);
-        
+      console.log(err);
       setError('Error splitting PDF. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Compress handler
+  const handleCompress = async () => {
+    if (!compressFile) {
+      setError('Please select a PDF file to compress');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('pdf', compressFile);
+
+    try {
+      setLoading(true);
+      const response = await axios.post('http://localhost:3000/compress-pdf', formData, {
+        responseType: 'blob',
+      });
+
+      downloadFile(response.data, `compressed_${compressFile.name}`);
+    } catch (err) {
+      console.log(err);
+      setError('Error compressing PDF. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -144,6 +170,7 @@ const PdfProcessor: React.FC = () => {
           >
             <MenuItem value="merge">Merge PDFs</MenuItem>
             <MenuItem value="split">Split PDF</MenuItem>
+            <MenuItem value="compress">Compress PDF</MenuItem>
           </Select>
         </FormControl>
 
@@ -256,6 +283,36 @@ const PdfProcessor: React.FC = () => {
               startIcon={loading ? <CircularProgress size={20} /> : <PictureAsPdf />}
             >
               {loading ? 'Splitting...' : 'Split PDF'}
+            </Button>
+          </Box>
+        )}
+
+        {/* Compress Interface */}
+        {operation === 'compress' && (
+          <Box>
+            <Button
+              variant="contained"
+              component="label"
+              startIcon={<CloudUpload />}
+              sx={{ mb: 2 }}
+            >
+              {compressFile ? compressFile.name : 'Select PDF File'}
+              <input
+                type="file"
+                hidden
+                accept="application/pdf"
+                onChange={(e) => handleFileUpload(e.target.files)}
+              />
+            </Button>
+
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleCompress}
+              disabled={loading || !compressFile}
+              startIcon={loading ? <CircularProgress size={20} /> : <PictureAsPdf />}
+            >
+              {loading ? 'Compressing...' : 'Compress PDF'}
             </Button>
           </Box>
         )}

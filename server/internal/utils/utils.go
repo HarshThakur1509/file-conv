@@ -1,8 +1,15 @@
 package utils
 
 import (
+	"fmt"
 	"image"
 	"image/color"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 func DetectBackgroundColor(img image.Image) color.Color {
@@ -67,4 +74,51 @@ func AbsDiff(a, b uint32) uint32 {
 		return a - b
 	}
 	return b - a
+}
+
+func ProcessUploadedFiles(r *http.Request, tempDir string) ([]string, error) {
+	var files []string
+
+	// Get all files from the "pdfs" form field
+	pdfFiles := r.MultipartForm.File["pdfs"]
+	if len(pdfFiles) < 2 {
+		return nil, fmt.Errorf("at least two PDF files are required")
+	}
+
+	for _, fileHeader := range pdfFiles {
+		file, err := fileHeader.Open()
+		if err != nil {
+			return nil, fmt.Errorf("error opening uploaded file: %v", err)
+		}
+		defer file.Close()
+
+		tempPath := filepath.Join(tempDir, filepath.Base(fileHeader.Filename))
+		outFile, err := os.Create(tempPath)
+		if err != nil {
+			return nil, fmt.Errorf("error creating temporary file: %v", err)
+		}
+		defer outFile.Close()
+
+		if _, err := io.Copy(outFile, file); err != nil {
+			return nil, fmt.Errorf("error saving uploaded file: %v", err)
+		}
+
+		files = append(files, tempPath)
+	}
+
+	return files, nil
+}
+
+// parsePageRanges converts a comma-separated string of page numbers into a slice of integers
+func ParsePageRanges(pageRanges string) ([]int, error) {
+	var pages []int
+	ranges := strings.Split(pageRanges, ",")
+	for _, r := range ranges {
+		page, err := strconv.Atoi(strings.TrimSpace(r))
+		if err != nil {
+			return nil, err
+		}
+		pages = append(pages, page)
+	}
+	return pages, nil
 }
